@@ -1,14 +1,14 @@
 import streamlit as st
 from dotenv import load_dotenv
+import os
 from PyPDF2 import PdfReader
 from langchain.text_splitter import CharacterTextSplitter
-from langchain_community.embeddings import OpenAIEmbeddings, HuggingFaceInstructEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain.vectorstores import FAISS
-from langchain.chat_models import ChatOpenAI
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
 from htmlTemplates import css, bot_template, user_template
-from langchain.llms import HuggingFaceHub
+import google.generativeai as genai
 
 def get_pdf_text(pdf_docs):
     text = ""
@@ -31,15 +31,22 @@ def get_text_chunks(text):
 
 
 def get_vectorstore(text_chunks):
-    embeddings = OpenAIEmbeddings()
-    # embeddings = HuggingFaceInstructEmbeddings(model_name="hkunlp/instructor-xl")
+    api_key = os.getenv("GEMINI_API_KEY")
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/embedding-001", 
+        google_api_key=api_key
+    )
     vectorstore = FAISS.from_texts(texts=text_chunks, embedding=embeddings)
     return vectorstore
 
 
 def get_conversation_chain(vectorstore):
-    llm = ChatOpenAI()
-    # llm = HuggingFaceHub(repo_id="google/flan-t5-xxl", model_kwargs={"temperature":0.5, "max_length":512})
+    api_key = os.getenv("GEMINI_API_KEY")
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-1.5-pro",  # Updated model name from "gemini-pro" to "gemini-1.5-pro"
+        temperature=0.7,
+        google_api_key=api_key
+    )
 
     memory = ConversationBufferMemory(
         memory_key='chat_history', return_messages=True)
@@ -66,6 +73,15 @@ def handle_userinput(user_question):
 
 def main():
     load_dotenv()
+    
+    # Configure Google Generative AI with API key
+    api_key = os.getenv("GEMINI_API_KEY")
+    if api_key:
+        genai.configure(api_key=api_key)
+    else:
+        st.error("Gemini API Key not found. Please add GEMINI_API_KEY to your .env file.")
+        return
+    
     st.set_page_config(page_title="Chat with multiple PDFs",
                        page_icon=":books:")
     st.write(css, unsafe_allow_html=True)
@@ -85,6 +101,10 @@ def main():
         pdf_docs = st.file_uploader(
             "Upload your PDFs here and click on 'Process'", accept_multiple_files=True)
         if st.button("Process"):
+            if not pdf_docs:
+                st.error("Please upload at least one PDF document.")
+                return
+                
             with st.spinner("Processing"):
                 # get pdf text
                 raw_text = get_pdf_text(pdf_docs)
@@ -98,6 +118,8 @@ def main():
                 # create conversation chain
                 st.session_state.conversation = get_conversation_chain(
                     vectorstore)
+                
+                st.success("Processing complete! You can now ask questions about your documents.")
 
 
 if __name__ == '__main__':
