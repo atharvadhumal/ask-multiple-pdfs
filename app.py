@@ -31,19 +31,36 @@ def get_text_chunks(text):
 
 
 def get_vectorstore(text_chunks):
+    # Check if text_chunks is empty
+    if not text_chunks:
+        st.error("No text was extracted from the documents. Please check if the PDFs contain readable text.")
+        return None
+    
+    # Add a sample chunk if debugging is needed
+    if len(text_chunks) == 0:
+        text_chunks = ["This is a sample text to prevent index error during development"]
+        
     api_key = os.getenv("GEMINI_API_KEY")
     embeddings = GoogleGenerativeAIEmbeddings(
         model="models/embedding-001", 
         google_api_key=api_key
     )
-    vectorstore = FAISS.from_texts(texts=text_chunks, embedding=embeddings)
-    return vectorstore
+    
+    try:
+        vectorstore = FAISS.from_texts(texts=text_chunks, embedding=embeddings)
+        return vectorstore
+    except Exception as e:
+        st.error(f"Error creating vector store: {str(e)}")
+        return None
 
 
 def get_conversation_chain(vectorstore):
+    if vectorstore is None:
+        return None
+        
     api_key = os.getenv("GEMINI_API_KEY")
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-pro",  # Updated model name from "gemini-pro" to "gemini-1.5-pro"
+        model="gemini-1.5-pro",
         temperature=0.7,
         google_api_key=api_key
     )
@@ -59,6 +76,10 @@ def get_conversation_chain(vectorstore):
 
 
 def handle_userinput(user_question):
+    if st.session_state.conversation is None:
+        st.error("Please process some documents first before asking questions.")
+        return
+        
     response = st.session_state.conversation({'question': user_question})
     st.session_state.chat_history = response['chat_history']
 
@@ -108,17 +129,31 @@ def main():
             with st.spinner("Processing"):
                 # get pdf text
                 raw_text = get_pdf_text(pdf_docs)
+                
+                if not raw_text.strip():
+                    st.error("Could not extract text from the uploaded PDFs. Please make sure they contain readable text.")
+                    return
 
                 # get the text chunks
                 text_chunks = get_text_chunks(raw_text)
+                
+                # Show number of chunks extracted (helpful for debugging)
+                st.info(f"Extracted {len(text_chunks)} text chunks from your documents.")
 
                 # create vector store
                 vectorstore = get_vectorstore(text_chunks)
+                
+                if vectorstore is None:
+                    st.error("Failed to create vector store. Please try with different documents.")
+                    return
 
                 # create conversation chain
-                st.session_state.conversation = get_conversation_chain(
-                    vectorstore)
+                st.session_state.conversation = get_conversation_chain(vectorstore)
                 
+                if st.session_state.conversation is None:
+                    st.error("Failed to initialize the conversation chain.")
+                    return
+                    
                 st.success("Processing complete! You can now ask questions about your documents.")
 
 
